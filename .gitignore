@@ -1,0 +1,9 @@
+# Archivos generados y locales
+**/target/
+*.class
+.idea/
+.vscode/
+*.log
+.env
+.env.*
+!.env.example

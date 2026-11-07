@@ -1,0 +1,100 @@
+# Cluster MongoDB: 1 PRIMARY + 2 SECONDARY (replica set rs0)
+# Cada nodo escucha en un puerto distinto (27017/27018/27019) para que los
+# mismos nombres de host funcionen dentro de Docker y desde la pc
+# (ver README: agregar mongo1/mongo2/mongo3 a tu archivo hosts).
+
+name: farmacia
+
+x-mongo: &mongo-base
+  image: mongodb/mongodb-community-server:8.0-ubi8
+  restart: unless-stopped
+  networks: [farmacia-net]
+  volumes:
+    - ./docker:/scripts:ro
+    - ./database:/database:ro
+  healthcheck:
+    test: ["CMD-SHELL", "mongosh --port $${MONGO_PORT} --quiet --eval 'db.adminCommand({ping: 1}).ok'"]
+    interval: 5s
+    timeout: 5s
+    retries: 12
+    start_period: 5s
+
+services:
+  mongo1:
+    <<: *mongo-base
+    container_name: mongo1
+    hostname: mongo1
+    environment: { MONGO_PORT: "27017" }
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
+    ports: ["127.0.0.1:27017:27017"]
+    volumes:
+      - mongo1-data:/data/db
+      - ./docker:/scripts:ro
+      - ./database:/database:ro
+
+  mongo2:
+    <<: *mongo-base
+    container_name: mongo2
+    hostname: mongo2
+    environment: { MONGO_PORT: "27018" }
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--port", "27018"]
+    ports: ["127.0.0.1:27018:27018"]
+    volumes:
+      - mongo2-data:/data/db
+      - ./docker:/scripts:ro
+      - ./database:/database:ro
+
+  mongo3:
+    <<: *mongo-base
+    container_name: mongo3
+    hostname: mongo3
+    environment: { MONGO_PORT: "27019" }
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--port", "27019"]
+    ports: ["127.0.0.1:27019:27019"]
+    volumes:
+      - mongo3-data:/data/db
+      - ./docker:/scripts:ro
+      - ./database:/database:ro
+
+  # Contenedor de un solo uso: inicia el replica set cuando los 3 nodos están sanos
+  mongo-init:
+    image: mongodb/mongodb-community-server:8.0-ubi8
+    container_name: mongo-init
+    networks: [farmacia-net]
+    depends_on:
+      mongo1: { condition: service_healthy }
+      mongo2: { condition: service_healthy }
+      mongo3: { condition: service_healthy }
+    volumes:
+      - ./docker:/scripts:ro
+    restart: "no"
+    command: ["mongosh", "--host", "mongo1", "--port", "27017", "--quiet", "/scripts/iniciar_rs.js"]
+
+  # Java/Maven como prueba opcional
+  
+  java-prueba:
+    image: maven:3.9-eclipse-temurin-21
+    working_dir: /app
+    volumes:
+      - ./app-codigo:/app
+      - maven-cache:/root/.m2
+    networks: [farmacia-net]
+    environment:
+      MONGO_URI: "mongodb://mongo1:27017,mongo2:27018,mongo3:27019/?replicaSet=rs0"
+    depends_on:
+      mongo1: { condition: service_healthy }
+      mongo2: { condition: service_healthy }
+      mongo3: { condition: service_healthy }
+      mongo-init: { condition: service_completed_successfully }
+    profiles: ["pruebas"]
+    command: ["mvn", "-q", "-DskipTests", "compile", "exec:java", "-Dexec.mainClass=conexion.ProbarConexion"]
+
+networks:
+  farmacia-net:
+    driver: bridge
+
+volumes:
+  mongo1-data:
+  mongo2-data:
+  mongo3-data:
+  maven-cache:

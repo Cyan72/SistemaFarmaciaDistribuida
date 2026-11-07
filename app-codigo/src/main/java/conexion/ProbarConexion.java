@@ -1,4 +1,6 @@
 
+package conexion;
+
 import org.bson.Document;
 
 /** verificar que Java ve el replica set rs0. */
